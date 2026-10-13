@@ -1,0 +1,30 @@
+import {bootstrapApplication} from '@angular/platform-browser';
+import {Component,OnInit} from '@angular/core';import {CommonModule} from '@angular/common';import {FormsModule} from '@angular/forms';
+@Component({selector:'app-root',standalone:true,imports:[CommonModule,FormsModule],template:`
+<header><b>◎ Encuestas <span>Universitarias</span></b><div *ngIf="user">{{user.username}} · {{user.role}} <button (click)="logout()">Salir</button></div></header>
+<main><section class="hero"><small>PORTAL ACADÉMICO · ENTORNO DE PRÁCTICA</small><h1>Tu opinión cuenta.</h1><p>Participá de las encuestas institucionales y compartí propuestas para mejorar la facultad.</p></section>
+<div class="banner"><b>Laboratorio de seguridad</b> · Instancia local con vulnerabilidades intencionales para el TP.</div>
+<section class="card login" *ngIf="!user"><h2>Ingresar al portal</h2><p>Usá una cuenta de demostración.</p><form (ngSubmit)="login()"><label>Usuario</label><input [(ngModel)]="username" name="username" required><label>Contraseña</label><input [(ngModel)]="password" name="password" type="password" required><button class="primary">Ingresar →</button></form><small>fede / fede123 · admin / admin123 · superadmin / super123</small></section>
+<ng-container *ngIf="user"><nav><button (click)="tab='surveys'">Encuestas</button><button *ngIf="isAdmin" (click)="tab='admin';loadAdmin()">Administración</button><button (click)="tab='lab';loadEvents()">Laboratorio / eventos</button></nav>
+<section *ngIf="tab==='surveys'"><article class="card" *ngFor="let s of surveys"><small class="tag">ENCUESTA ACTIVA #{{s.id}}</small><h2>{{s.title}}</h2><p>{{s.description}}</p><div class="choices"><label *ngFor="let c of choicesFor(s.id)"><input type="radio" [name]="'s'+s.id" [value]="c.id" [(ngModel)]="selected[s.id]"> {{c.label}} <small>({{countFor(s.id,c.id)}} votos)</small></label></div><button class="primary" (click)="vote(s.id)">Enviar respuesta</button><hr><h3>Comentarios</h3><div class="comment" *ngFor="let c of commentsFor(s.id)"><b>{{c.username}}</b><div class="comment-body" [innerHTML]="c.body"></div></div><form class="comment-form" (ngSubmit)="comment(s.id)"><input [(ngModel)]="draft[s.id]" [name]="'c'+s.id" placeholder="Dejá tu comentario…" required><button>Publicar</button></form></article></section>
+<section class="card" *ngIf="tab==='admin'&&isAdmin"><small>PANEL INTERNO</small><h2>Administración de facultad</h2><p>Usuarios: {{summary?.users}} · Votos: {{summary?.votes}}</p><h3>Exportar logs de actividad</h3><div class="inline"><input [(ngModel)]="file" name="file"><button (click)="readLogs()">Leer archivo</button></div><pre>{{logs}}</pre><h3>Resultados</h3><p *ngFor="let r of results">{{r.label}} — {{r.count}}</p><details><summary>Endpoint interno de auditoría</summary><code>GET /api/admin/votes?vote_id=…</code></details></section>
+<section class="card" *ngIf="tab==='lab'"><h2>Laboratorio / eventos</h2><p>Recolector local: los valores de cookie se redactan en los logs.</p><button (click)="loadEvents()">Actualizar eventos</button><pre>{{events.join('\\n')||'Todavía no hay eventos relevantes.'}}</pre><p *ngIf="isAdmin"><button (click)="demoToken()">Generar token JWT de demostración</button></p><pre>{{demo}}</pre><ol><li>Stored XSS en comentarios.</li><li>Cookie sin HttpOnly y JWT alg:none.</li><li>Path traversal al leer logs.</li><li>SQL injection con stacked queries.</li></ol></section>
+<p class="notice" *ngIf="notice">{{notice}}</p></ng-container><footer>Facultad · Portal de encuestas <span>Laboratorio académico</span></footer></main>`})
+class App implements OnInit{
+ user:any=null;username='fede';password='fede123';tab='surveys';surveys:any[]=[];choices:any[]=[];comments:any[]=[];counts:any[]=[];selected:any={};draft:any={};notice='';summary:any;results:any[]=[];file='activity.log';logs='';events:string[]=[];demo='';
+ get isAdmin(){return ['admin','superadmin'].includes(this.user?.role)}
+ async api(url:string,opts:any={}):Promise<any>{let r=await fetch(url,{credentials:'include',...opts,headers:{'Content-Type':'application/json',...(opts.headers||{})}});let d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||'Error');return d}
+ ngOnInit(){this.api('/api/me').then(u=>{this.user=u;this.refresh()}).catch(()=>{})}
+ async login(){try{await this.api('/api/login',{method:'POST',body:JSON.stringify({username:this.username,password:this.password})});this.user=await this.api('/api/me');this.notice='Sesión iniciada';await this.refresh()}catch(e:any){this.notice=e.message}}
+ async logout(){await fetch('/api/logout',{method:'POST',credentials:'include'});this.user=null}
+ async refresh(){let d=await this.api('/api/surveys');this.surveys=d.surveys;this.choices=d.choices;this.comments=d.comments;this.counts=d.counts}
+ choicesFor(id:number){return this.choices.filter(c=>c.survey_id===id)} commentsFor(id:number){return this.comments.filter(c=>c.survey_id===id)}
+ countFor(s:number,c:number){return this.counts.find(x=>x.survey_id===s&&x.choice_id===c)?.count||0}
+ async vote(id:number){try{await this.api('/api/surveys/'+id+'/vote',{method:'POST',body:JSON.stringify({choice_id:this.selected[id]})});this.notice='Respuesta registrada';await this.refresh()}catch(e:any){this.notice=e.message}}
+ async comment(id:number){try{await this.api('/api/surveys/'+id+'/comments',{method:'POST',body:JSON.stringify({body:this.draft[id]})});this.draft[id]='';await this.refresh();this.notice='Comentario publicado'}catch(e:any){this.notice=e.message}}
+ async loadAdmin(){try{this.summary=await this.api('/api/admin/summary');this.results=await this.api('/api/admin/vote-results')}catch(e:any){this.notice=e.message}}
+ async readLogs(){try{this.logs=await(await fetch('/api/admin/logs?file='+encodeURIComponent(this.file),{credentials:'include'})).text()}catch(e:any){this.logs=e.message}}
+ async loadEvents(){try{this.events=(await this.api('/lab/events')).events}catch{}}
+ async demoToken(){try{this.demo=(await this.api('/api/admin/impersonate-demo')).token}catch(e:any){this.notice=e.message}}
+}
+bootstrapApplication(App);
